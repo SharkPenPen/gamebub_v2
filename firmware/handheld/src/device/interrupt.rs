@@ -186,7 +186,9 @@ impl Device<'_> {
                                 if let Err(error) =
                                     device.fpga.write_u32(fpga::REG_IRQ_STATUS, fpga_irq)
                                 {
-                                    log::warn!("[FPGA] could not clear irq 0x{fpga_irq:08X}: {error}");
+                                    log::warn!(
+                                        "[FPGA] could not clear irq 0x{fpga_irq:08X}: {error}"
+                                    );
                                 }
                                 worker::send(worker::Message::FpgaIrq(fpga_irq));
                             }

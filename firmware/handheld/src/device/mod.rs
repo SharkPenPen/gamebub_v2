@@ -258,7 +258,9 @@ impl Device<'_> {
         // Setup IMU
         let mut imu = drivers::imu::LSM6DS3TRC::new(MutexI2C::new(&i2c));
         if let Err(error) = imu.init() {
-            log::warn!("[IMU] initialization failed: {error} - motion-controlled games will not work");
+            log::warn!(
+                "[IMU] initialization failed: {error} - motion-controlled games will not work"
+            );
         }
 
         // Ensure fpga power has stabilized.
@@ -526,9 +528,7 @@ impl Device<'_> {
 
             // Let LCD stabilize and refresh before turning on backlight. Measured empirically.
             std::thread::sleep(Duration::from_millis(200));
-            let _ = self
-                .lcd_backlight
-                .set_duty_cycle(self.lcd_backlight_duty);
+            let _ = self.lcd_backlight.set_duty_cycle(self.lcd_backlight_duty);
         }
 
         self.display_mode = new_mode;

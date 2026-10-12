@@ -46,7 +46,11 @@ impl Summary {
 
 impl Display for Summary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} failure(s), {} warning(s)", self.failures, self.warnings)
+        write!(
+            f,
+            "{} failure(s), {} warning(s)",
+            self.failures, self.warnings
+        )
     }
 }
 
@@ -62,15 +66,16 @@ fn pin_is_low<P: InputPin>(pin: &mut P) -> bool {
 
 /// Pack I/O expander inputs into a word, for logging.
 fn pins_to_u16(pins: [bool; 16]) -> u16 {
-    pins.iter()
-        .enumerate()
-        .fold(0u16, |value, (index, &high)| {
+    pins.iter().enumerate().fold(
+        0u16,
+        |value, (index, &high)| {
             if high {
                 value | (1 << index)
             } else {
                 value
             }
-        })
+        },
+    )
 }
 
 /// Run every hardware check, logging one line per check.
@@ -200,7 +205,9 @@ fn check_system_files(summary: &mut Summary) {
     ] {
         match util::open_system_file(name) {
             Ok(_) => log::info!("[SYS] {name}: found"),
-            Err(_) => summary.warn(&format!("[SYS] {name}: not found (needed to boot that core)")),
+            Err(_) => summary.warn(&format!(
+                "[SYS] {name}: not found (needed to boot that core)"
+            )),
         }
     }
 }
@@ -244,8 +251,9 @@ fn check_imu(device: &mut Device<'_>, summary: &mut Summary) {
             sample.y,
             sample.z
         ),
-        Err(_) => summary
-            .warn("[IMU] accelerometer read failed: motion-controlled games will not work"),
+        Err(_) => {
+            summary.warn("[IMU] accelerometer read failed: motion-controlled games will not work")
+        }
     }
 }
 

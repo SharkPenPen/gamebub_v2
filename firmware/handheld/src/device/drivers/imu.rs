@@ -84,9 +84,9 @@ where
                         value
                     );
                 }
-                Err(_) => log::warn!(
-                    "IMU WHO_AM_I read failed, attempt {attempt}/{WHO_AM_I_ATTEMPTS}"
-                ),
+                Err(_) => {
+                    log::warn!("IMU WHO_AM_I read failed, attempt {attempt}/{WHO_AM_I_ATTEMPTS}")
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
