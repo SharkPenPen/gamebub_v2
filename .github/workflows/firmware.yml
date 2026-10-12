@@ -1,35 +1,43 @@
-name: Continuous Integration
+name: Firmware
 
+# GitHub only reads workflows from the repository root, so this is the file that
+# actually runs. It replaces the copy that used to live in firmware/handheld/.
 on:
   push:
-    paths-ignore:
-      - "**/README.md"
   pull_request:
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  rust-checks:
-    name: Rust Checks
+  firmware:
+    name: ESP32-S3 firmware (rev2)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware/handheld
     strategy:
       fail-fast: false
       matrix:
         action:
           - command: build
-            args: --release
+            args: --release --features=rev2
           - command: fmt
             args: --all -- --check --color always
           - command: clippy
-            args: --all-targets --all-features --workspace -- -D warnings
+            args: --all-targets --workspace --features=rev2 -- -D warnings
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware/handheld
+          # ESP-IDF and its tools are the slow part of a cold build.
+          cache-directories: |
+            ~/.espressif
+            ~/.embuild
       - name: Setup Rust
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
