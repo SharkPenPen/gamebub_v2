@@ -153,3 +153,6 @@ The device should automatically reboot into the main menu.
 
 If it does not, the boot log says why: see
 [hardware-diagnostics.md](./hardware-diagnostics.md) for what each line means.
+
+For the order to bring a revision 2 board up, add features to and simplify this fork, see
+[roadmap.md](./roadmap.md).
