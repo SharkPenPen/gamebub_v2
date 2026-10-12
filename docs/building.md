@@ -150,3 +150,6 @@ $ python3 flash_nvs.py --serial serialno --revision 2
 ```
 
 The device should automatically reboot into the main menu.
+
+If it does not, the boot log says why: see
+[hardware-diagnostics.md](./hardware-diagnostics.md) for what each line means.
