@@ -76,6 +76,7 @@ where
                 Ok(value) => {
                     chip_id = value;
                     if CHIP_IDS.contains(&value) {
+                        log::info!("[IMU] chip id 0x{:02X} accepted", value);
                         break;
                     }
                     log::warn!(
