@@ -47,7 +47,11 @@ pub enum Message {
 /// Send a message to the UI thread.
 pub fn send(message: Message) {
     match SENDER.get() {
-        Some(sender) => sender.send(message).unwrap(),
+        Some(sender) => {
+            if sender.send(message).is_err() {
+                log::warn!("UI thread is gone, dropping a message");
+            }
+        }
         None => log::error!("Dropping UI message {:?}", message),
     }
 }
@@ -138,15 +142,22 @@ pub struct UI {
 
 impl UI {
     pub fn new(device: &mut Device) -> Self {
-        // Start the boot animation.
-        device.fpga.write_u32(0xC000_0004, 36).unwrap(); // Set logo y
-        let display_mode = if device.read_hdmi_detect().unwrap() {
-            DisplayMode::External
-        } else {
-            DisplayMode::Internal
+        // Start the boot animation. The FPGA may not answer (for example when
+        // the bitstream on the card does not match this firmware), and that must
+        // not take the UI down with it.
+        let _ = device.fpga.write_u32(0xC000_0004, 36); // Set logo y
+        let display_mode = match device.read_hdmi_detect() {
+            Ok(true) => DisplayMode::External,
+            Ok(false) => DisplayMode::Internal,
+            Err(_) => {
+                log::warn!("[UI] HDMI detect failed, assuming the internal display");
+                DisplayMode::Internal
+            }
         };
-        device.change_display_mode(display_mode).unwrap();
-        device.fpga.write_u32(0xC000_0000, 1).unwrap(); // Start animation (no loop)
+        if let Err(error) = device.change_display_mode(display_mode) {
+            log::warn!("[UI] could not set the display mode: {error}");
+        }
+        let _ = device.fpga.write_u32(0xC000_0000, 1); // Start animation (no loop)
         let boot_animation_end = Instant::now() + Duration::from_secs(1);
 
         let (sender, receiver) = mpsc::channel::<Message>();

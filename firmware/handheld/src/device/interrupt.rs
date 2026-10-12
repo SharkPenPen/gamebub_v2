@@ -37,6 +37,19 @@ fn setup_gpio_interrupt(
     Ok(())
 }
 
+/// Subscribe an interrupt, reporting a failure instead of panicking.
+fn setup_or_log(
+    pin: &mut PinDriver<'_, impl Pin, impl InputMode>,
+    interrupt_type: InterruptType,
+    notifier: Arc<Notifier>,
+    flags: NonZeroU32,
+    name: &str,
+) {
+    if let Err(error) = setup_gpio_interrupt(pin, interrupt_type, notifier, flags) {
+        log::warn!("[IRQ] could not subscribe {name}: {error}");
+    }
+}
+
 impl Device<'_> {
     /// Setup interrupts on the Device interrupt sources:
     ///
@@ -52,41 +65,41 @@ impl Device<'_> {
 
                 {
                     let device = &mut Device::get().lock().unwrap();
-                    setup_gpio_interrupt(
+                    setup_or_log(
                         &mut device.button_home,
                         InterruptType::AnyEdge,
                         notification.notifier(),
                         FLAG_HOME,
-                    )
-                    .unwrap();
-                    setup_gpio_interrupt(
+                        "the home button",
+                    );
+                    setup_or_log(
                         &mut device.button_power,
                         InterruptType::AnyEdge,
                         notification.notifier(),
                         FLAG_POWER,
-                    )
-                    .unwrap();
-                    setup_gpio_interrupt(
+                        "the power button",
+                    );
+                    setup_or_log(
                         &mut device.button_vol_up,
                         InterruptType::AnyEdge,
                         notification.notifier(),
                         FLAG_VOL_UP,
-                    )
-                    .unwrap();
-                    setup_gpio_interrupt(
+                        "volume up",
+                    );
+                    setup_or_log(
                         &mut device.button_vol_down,
                         InterruptType::AnyEdge,
                         notification.notifier(),
                         FLAG_VOL_DOWN,
-                    )
-                    .unwrap();
-                    setup_gpio_interrupt(
+                        "volume down",
+                    );
+                    setup_or_log(
                         &mut device.pin_irq,
                         InterruptType::LowLevel,
                         notification.notifier(),
                         FLAG_MCU_IRQ,
-                    )
-                    .unwrap();
+                        "the FPGA interrupt line",
+                    );
                 }
 
                 let mut prev_hdmi_detected: Option<bool> = None;
@@ -112,14 +125,27 @@ impl Device<'_> {
                         let _ = device.button_vol_down.enable_interrupt();
                     }
 
-                    let io_expander = device.io_expander.get_pins().unwrap();
-                    let buttons = device.read_button_state(io_expander).unwrap();
-                    ui::send(ui::Message::Button(buttons));
+                    let io_expander = match device.io_expander.get_pins() {
+                        Ok(pins) => pins,
+                        Err(error) => {
+                            log::warn!("[IOEXP] read failed in the interrupt handler: {error}");
+                            let _ = device.pin_irq.enable_interrupt();
+                            continue;
+                        }
+                    };
+                    match device.read_button_state(io_expander) {
+                        Ok(buttons) => ui::send(ui::Message::Button(buttons)),
+                        Err(_) => log::warn!("[BTN] could not decode the button state"),
+                    }
 
-                    let hdmi_detected = device.parse_hdmi_detect(io_expander).unwrap();
-                    if prev_hdmi_detected != Some(hdmi_detected) {
-                        prev_hdmi_detected = Some(hdmi_detected);
-                        worker::send(worker::Message::HdmiDetectState(hdmi_detected));
+                    match device.parse_hdmi_detect(io_expander) {
+                        Ok(hdmi_detected) => {
+                            if prev_hdmi_detected != Some(hdmi_detected) {
+                                prev_hdmi_detected = Some(hdmi_detected);
+                                worker::send(worker::Message::HdmiDetectState(hdmi_detected));
+                            }
+                        }
+                        Err(_) => log::warn!("[HDMI] hot-plug state could not be read"),
                     }
 
                     if (flags & FLAG_MCU_IRQ.get()) != 0 {
@@ -140,20 +166,34 @@ impl Device<'_> {
                         // DAC IRQs.
                         if let Ok(dac_irq) = device.dac.get_interrupt_status() {
                             if dac_irq.headset_detected {
-                                let has_headphones = device.dac.get_headphones_detected().unwrap();
-                                worker::send(worker::Message::HeadphoneState(has_headphones));
+                                match device.dac.get_headphones_detected() {
+                                    Ok(has_headphones) => {
+                                        worker::send(worker::Message::HeadphoneState(
+                                            has_headphones,
+                                        ));
+                                    }
+                                    Err(error) => log::warn!(
+                                        "[DAC] headphone state could not be read: {error}"
+                                    ),
+                                }
                             }
                         }
 
                         // Read FPGA.
                         // TODO: only read and ack interrupts that we've enabled?
-                        let fpga_irq = device.fpga.read_u32(fpga::REG_IRQ_STATUS).unwrap();
-                        if fpga_irq != 0 {
-                            device
-                                .fpga
-                                .write_u32(fpga::REG_IRQ_STATUS, fpga_irq)
-                                .unwrap();
-                            worker::send(worker::Message::FpgaIrq(fpga_irq));
+                        match device.fpga.read_u32(fpga::REG_IRQ_STATUS) {
+                            Ok(fpga_irq) if fpga_irq != 0 => {
+                                if let Err(error) =
+                                    device.fpga.write_u32(fpga::REG_IRQ_STATUS, fpga_irq)
+                                {
+                                    log::warn!("[FPGA] could not clear irq 0x{fpga_irq:08X}: {error}");
+                                }
+                                worker::send(worker::Message::FpgaIrq(fpga_irq));
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                log::warn!("[FPGA] could not read the irq status: {error}")
+                            }
                         }
 
                         let _ = device.pin_irq.enable_interrupt();
