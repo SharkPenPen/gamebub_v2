@@ -8,6 +8,7 @@ use crate::ui::UI;
 mod bitstream;
 mod device;
 mod kvs;
+mod power;
 pub mod ui;
 mod util;
 mod worker;
@@ -15,11 +16,11 @@ mod worker;
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
+    log::set_max_level(log::LevelFilter::Info);
     esp_idf_svc::log::set_target_level("gpio", log::LevelFilter::Warn).unwrap();
 
     kvs::Kvs::init()?;
-    log::info!("Device revision {:?}", kvs::keys::DEVICE_REVISION.get());
-    log::info!("Serial: {:?}", kvs::keys::DEVICE_SERIAL.get());
+    log_boot_banner();
 
     // Check that the firmware is compatible with the listed revision.
     cfg_if::cfg_if! {
@@ -73,6 +74,51 @@ fn main() -> anyhow::Result<()> {
 
     // Run UI in this thread.
     ui.run();
+}
+
+/// Print what was built, what it is running on, and why it last reset.
+///
+/// This is the first thing the application logs, and it is the line to compare
+/// when the device does not behave like the firmware that was just flashed.
+fn log_boot_banner() {
+    log::info!("################ Game Bub handheld ################");
+    log::info!("# firmware    : {}", env!("CARGO_PKG_VERSION"));
+    log::info!("# git commit  : {}", env!("GIT_COMMIT"));
+    log::info!("# device rev  : {:?}", kvs::keys::DEVICE_REVISION.get());
+    log::info!("# serial      : {:?}", kvs::keys::DEVICE_SERIAL.get());
+    log::info!("# reset reason: {}", reset_reason_name());
+    log::info!("##################################################");
+}
+
+/// Human-readable name of the reason the MCU last reset.
+///
+/// A repeating `WDT`/`TASK_WDT` here means something hangs during boot, which
+/// is the most useful signal when the device shows nothing on screen.
+fn reset_reason_name() -> &'static str {
+    // This is a plain C function in some esp-idf-svc versions and a typed
+    // wrapper in others, hence the two allow attributes.
+    #[allow(unused_unsafe)]
+    #[allow(clippy::unnecessary_cast)]
+    let reason = unsafe { esp_idf_svc::sys::esp_reset_reason() } as u32;
+    match reason {
+        0 => "UNKNOWN",
+        1 => "POWERON",
+        2 => "EXT_PIN",
+        3 => "SW",
+        4 => "PANIC",
+        5 => "INT_WDT",
+        6 => "TASK_WDT",
+        7 => "WDT",
+        8 => "DEEPSLEEP",
+        9 => "BROWNOUT",
+        10 => "SDIO",
+        11 => "USB",
+        12 => "JTAG",
+        13 => "EFUSE",
+        14 => "PWR_GLITCH",
+        15 => "CPU_LOCKUP",
+        _ => "UNRECOGNIZED",
+    }
 }
 
 fn show_fatal_error_anyhow(error: anyhow::Error) {

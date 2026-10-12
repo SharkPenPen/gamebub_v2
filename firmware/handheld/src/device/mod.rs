@@ -233,6 +233,23 @@ impl Device<'_> {
         pin_vbus_pgood.set_pull(gpio::Pull::Up)?;
         let pin_batt_chg = PinDriver::input(pin_batt_chg)?;
 
+        // Low-voltage interlock: never bring the FPGA up on a collapsing rail.
+        // The FPGA is simply left unpowered and the boot continues, so the
+        // self-test can still report why the device is not starting.
+        let vbus_present = pin_vbus_pgood.is_low(); // Active low
+        match fuel_gauge.get_battery_voltage() {
+            Ok(voltage) if crate::power::is_battery_critical(voltage, vbus_present) => {
+                log::error!(
+                    "[PWR] PROTECTION: battery at {:.2} V is below the {:.2} V cutoff and VBUS is absent - leaving the FPGA off",
+                    voltage,
+                    crate::power::CUTOFF_VOLTAGE
+                );
+                fpga_power.set_low()?;
+            }
+            Ok(voltage) => log::info!("[PWR] battery voltage {:.2} V", voltage),
+            Err(_) => log::warn!("[PWR] fuel gauge read failed during the low-voltage check"),
+        }
+
         // Setup IMU
         let mut imu = drivers::imu::LSM6DS3TRC::new(MutexI2C::new(&i2c));
         imu.init()?;

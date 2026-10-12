@@ -20,3 +20,13 @@ CONFIG_FLASHMODE_QIO=y
 # Enable USB Mass Storage Class support
 CONFIG_TINYUSB=y
 CONFIG_TINYUSB_MSC_ENABLED=y
+
+# Console and log levels, so that the boot log can be read both on UART0
+# (GPIO43/GPIO44) and over the USB-C port (USB-Serial/JTAG). The ROM and the
+# second stage bootloader (esptool) speak over the same USB port.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
