@@ -159,38 +159,37 @@ For the order to bring a revision 2 board up, add features to and simplify this 
 
 ### Flashing from a CI build
 
-Every push builds the firmware on GitHub Actions (see
-`.github/workflows/firmware.yml`), and a successful `build` job attaches the application
-image to the run as the `gamebub-rev2-firmware` artifact:
+Every push builds the firmware on GitHub Actions (see `.github/workflows/firmware.yml`),
+and a successful `build` job attaches a single merged image to the run as the
+`gamebub-rev2-firmware` artifact:
 
 1. Open the latest run under *Actions* and download that artifact. It contains
    `gamebub-rev2.bin`.
 2. Put the device into download mode (hold "Home" while switching it on) and write the
-   application to its partition at **`0x30000`** (see `partitions.csv`), either with the
-   Espressif flash tool or from the command line:
+   whole image at offset `0x0`, either with the Espressif flash tool or from the command
+   line:
 
    ```sh
-   esptool.py --chip esp32s3 write_flash 0x30000 gamebub-rev2.bin
+   esptool.py --chip esp32s3 write_flash 0x0 gamebub-rev2.bin
    ```
 
-The image is the revision 2 application, written by espflash with this repository's
-`espflash.toml`, so it is the same image a local `cargo run --release --features=rev2`
-would flash. The workflow reads it back and checks that it really is an ESP-IDF
-application for this crate before publishing it.
+The image merges the prebuilt bootloader (`0x0`), the partition table from `partitions.csv`
+(`0x8000`) and the revision 2 application (`0x30000`), written by espflash with this
+repository's `espflash.toml`, so it is what a local `cargo run --release --features=rev2`
+would produce. The workflow reads it back and checks all three parts before publishing it,
+and it is not padded to the flash size, so it is safe on both 4 MB and 8 MB parts.
 
-Writing only the application leaves the bootloader, the partition table and the factory
-data untouched, which is what a normal update wants. For a device whose flash was wiped:
-the bootloader is `esp32s3-qio-bootloader-fast.bin` at `0x0` and the partition table comes
-from `partitions.csv` at `0x8000`. A *merged* image is deliberately not published - it
-would fill the gap between `0x8000` and `0x30000` with `0xFF` and wipe `nvs_ro`.
+**What a merged image costs.** Every gap in the merge is filled with `0xFF`, including
+`nvs_ro` (serial and hardware revision, `0x9000`) and `nvs` (settings, `0x10000`). A device
+flashed this way therefore reports `device rev : None` and `serial : None` in the boot
+banner and starts with default settings; the firmware warns and continues on purpose.
+`flash_nvs.py` can write the factory data again later, and settings re-accumulate on their
+own.
 
-If you flash locally, note that `espflash.toml` uses the **espflash 3.x** layout. espflash 4.x
-expects `bootloader` and `partition_table` to live in an `[idf_format_args]` table and
+To update without touching the factory data, flash only the application at `0x30000`
+instead. The other two parts are `esp32s3-qio-bootloader-fast.bin` at `0x0` and a partition
+table generated from `partitions.csv` at `0x8000`.
+
+If you flash locally, note that `espflash.toml` uses the **espflash 3.x** layout. espflash
+4.x expects `bootloader` and `partition_table` to live in an `[idf_format_args]` table and
 refuses to run otherwise, which is why the workflow pins espflash 3.3.0.
-
-The per-device factory data (serial, hardware revision) lives in that `nvs_ro` partition.
-Without it the firmware says so in the boot banner and keeps going; `flash_nvs.py` can write
-it at any later point.
-
-The bitstreams are separate and live on the SD card: [roadmap.md](./roadmap.md) lists the
-three files and their checksums.
