@@ -156,3 +156,30 @@ If it does not, the boot log says why: see
 
 For the order to bring a revision 2 board up, add features to and simplify this fork, see
 [roadmap.md](./roadmap.md).
+
+### Flashing from a CI build
+
+Every push builds the firmware on GitHub Actions (see
+`.github/workflows/firmware.yml`), and a successful `build` job attaches a single flashable
+image to the run:
+
+1. Open the latest run under *Actions* and download the `gamebub-rev2-firmware` artifact.
+   It contains `gamebub-rev2.bin`.
+2. Put the device into download mode (hold "Home" while switching it on) and write the
+   image at offset `0x0`, either with the Espressif flash tool or from the command line:
+
+   ```sh
+   esptool.py --chip esp32s3 write_flash 0x0 gamebub-rev2.bin
+   ```
+
+The image already contains the bootloader, the partition table (the application lives at
+`0x30000`) and the application, all built from this repository's `espflash.toml`, so it is
+the same thing a local `cargo run --release --features=rev2` would flash. The workflow also
+reads the image back and checks the partition table before publishing it.
+
+The per-device factory data (serial, hardware revision) lives in the `nvs_ro` partition and
+is **not** part of the image. Without it the firmware says so in the boot banner and keeps
+going; `flash_nvs.py` can write it at any later point.
+
+The bitstreams are separate and live on the SD card: [roadmap.md](./roadmap.md) lists the
+three files and their checksums.

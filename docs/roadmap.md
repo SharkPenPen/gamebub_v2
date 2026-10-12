@@ -77,7 +77,7 @@ Only features that live entirely on the ESP32 side. Upstream paths are from the 
 
 | # | Feature | Upstream source | Value | Risk |
 |---|---|---|---|---|
-| 1 | USB device stack: SD card as mass storage, plus a CDC log stream | `device/drivers/usb/{mod,control,descriptors,cdc_stream}.rs` | high - read the boot log and copy ROMs/saves over USB-C | medium - see the console conflict below |
+| ~~1~~ | ~~USB device stack: SD card as mass storage, plus a CDC log stream~~ | `device/drivers/usb/{mod,control,descriptors,cdc_stream}.rs` | **declined** - see the decision below | - |
 | 2 | Save-file management (backup/restore to SD) | `cart_backup.rs` | high | low |
 | 3 | LCD split, backlight driver module | `device/drivers/ili9488.rs`, `lcd_backlight.rs` | medium (structure) | low |
 | 4 | UI: notifications, setup wizard, screenshot to SD | `ui/state/notifications.rs`, `ui/state/setup.rs`, `ui/screenshot.rs` | medium-high | low |
@@ -86,12 +86,12 @@ Only features that live entirely on the ESP32 side. Upstream paths are from the 
 | 7 | Module structure: `bitstream/gameboy.rs` -> `gameboy/`, `drivers/fpga.rs` -> `fpga/`, `fuel_gauge.rs` -> `max17048.rs`, `lcd.rs` -> `ili9488.rs` | same paths upstream | medium (structure) | low |
 | 8 | DMG palette / colour-correction helpers | `bitstream/gameboy/dmg_palette.rs`, `bitstream/util/color_correction.rs` | medium | **check first**: if these write framework-era FPGA registers, they are not portable |
 
-**The console conflict (item 1).** `sdkconfig.defaults` currently routes the log to
-USB-Serial/JTAG so the USB-C port can be read without extra hardware. TinyUSB mass storage
-uses the same USB pins, so enabling the USB device stack means giving up that console -
-unless the log moves to the CDC stream (`cdc_stream.rs`), which is the upstream design.
-Decide this once: either "USB-JTAG console, no mass storage" or "USB stack with CDC log
-and mass storage".
+**Decision on item 1 (recorded).** The USB device stack is **not wanted**. The
+USB-Serial/JTAG console that `sdkconfig.defaults` enables is what makes the boot log
+readable over USB-C with nothing but a cable, and that is worth more than mass storage on
+this board - they share the same USB pins, so it is one or the other. Logs are read with a
+serial terminal; ROMs and saves are moved with a card reader. Item 1 only comes back if
+that trade-off is revisited.
 
 **Not portable until a bitstream can be built.** Everything that talks to the framework
 register set or the core command channel: `core/{mod,info,settings}.rs` (loading and
@@ -137,7 +137,8 @@ The three steps as stated (run it, add features, simplify) are right, with four 
 ## Do these three things next
 
 1. Swap `system/gba.bit.gz` for the `v0.1` copy and verify all three hashes (phase 0).
-2. Flash the current firmware, capture one full boot log, and read it against
-   [hardware-diagnostics.md](./hardware-diagnostics.md).
-3. Start phase 2 with the USB device stack, since it is the highest-value item that is
-   provably independent of the FPGA.
+2. Download the `gamebub-rev2-firmware` artifact from the latest Actions run, write it at
+   `0x0` (see [building.md](./building.md)) and capture one full boot log - over USB-C or
+   UART0. No local toolchain is needed for either step.
+3. Read that log against [hardware-diagnostics.md](./hardware-diagnostics.md) and fix only
+   what it reports; phase 2 starts once the self-test comes back clean.
