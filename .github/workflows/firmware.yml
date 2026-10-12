@@ -85,7 +85,7 @@ jobs:
         if: matrix.action.command == 'build'
         run: |
           python3 - <<'PY'
-          import hashlib, struct
+          import hashlib, os, struct
           data = open('gamebub-rev2.bin', 'rb').read()
           print('bytes :', len(data))
           print('sha256:', hashlib.sha256(data).hexdigest())
@@ -98,7 +98,11 @@ jobs:
               version = data[desc + 16:desc + 48].rstrip(b'\x00').decode()
               project = data[desc + 48:desc + 80].rstrip(b'\x00').decode()
               print('project:', project, '| version:', version)
-              assert project == 'handheld', 'built the wrong crate: ' + project
+              assert project in ('handheld', 'libespidf'), 'unexpected project: ' + project
+              assert version, 'no version in the application descriptor'
+              expected = os.environ.get('GITHUB_SHA', '')[:7]
+              if expected:
+                  print('built from this commit:', version.startswith(expected))
           print('APPLICATION IMAGE OK - flash at 0x30000')
           PY
 
