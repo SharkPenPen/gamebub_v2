@@ -9,7 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Pinned so the shape of the image does not change under us.
+  # Pinned so the shape of the command line does not change under us.
   ESPFLASH_VERSION: v4.4.0
 
 jobs:
@@ -56,12 +56,11 @@ jobs:
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
 
       # --- Only the build job has something to hand out ---------------------
-      # A single image to write at 0x0 with the Espressif flash tool (or
-      # `esptool write_flash 0x0 gamebub-rev2.bin`). It is produced by espflash
-      # from this project's espflash.toml, so it carries the same prebuilt
-      # bootloader, the same partition table (the application sits at 0x30000)
-      # and the same application image that a local
-      # `cargo run --release --features=rev2` would flash.
+      # The *application* image, not a merged one: a merged image would fill the
+      # gap between the partition table (0x8000) and the application (0x30000)
+      # with 0xFF and wipe nvs_ro, which holds the serial and the hardware
+      # revision. Writing just the application at 0x30000 leaves the bootloader,
+      # the partition table and the factory data alone.
       - name: Install espflash
         if: matrix.action.command == 'build'
         run: |
@@ -70,46 +69,38 @@ jobs:
           chmod +x "$HOME/.cargo/bin/cargo-espflash"
           cargo espflash --version
 
-      - name: Build the flashable image
+      - name: Build the application image
         if: matrix.action.command == 'build'
         run: |
-          cargo espflash save-image --chip esp32s3 --flash-size 8mb \
-            target/xtensa-esp32s3-espidf/release/handheld gamebub-rev2.bin
+          cargo espflash save-image --chip esp32s3 --release --features=rev2 gamebub-rev2.bin
           ls -l gamebub-rev2.bin
           sha256sum gamebub-rev2.bin
 
-      # Reading the image back is the only way to be sure it holds *this*
-      # project's partition table: espflash would happily fall back to its own
-      # defaults if espflash.toml were ignored, and the device would not boot.
+      # Read the image back before publishing it: espflash would happily emit an
+      # image for the wrong crate, or ignore espflash.toml, and the result would
+      # only show up as a device that does not boot.
       - name: Check the image
         if: matrix.action.command == 'build'
         run: |
           python3 - <<'PY'
           import hashlib, struct
           data = open('gamebub-rev2.bin', 'rb').read()
-          print('image bytes:', len(data))
-          print('sha256     :', hashlib.sha256(data).hexdigest())
-          table = data[0x8000:0x9000]
-          entries = []
-          for i in range(0, len(table) - 32, 32):
-              entry = table[i:i + 32]
-              if entry[:2] != b'\xaa\x50':
-                  break
-              offset, size = struct.unpack('<II', entry[4:12])
-              name = entry[12:28].rstrip(b'\x00').decode()
-              entries.append((name, offset, size))
-          print('partitions :', [(n, hex(o)) for n, o, _ in entries])
-          assert entries and entries[0][0] == 'nvs_ro' and entries[0][1] == 0x9000, \
-              'the partition table at 0x8000 is not this project\'s'
-          apps = [e for e in entries if e[0] == 'factory']
-          assert apps, 'no factory application partition'
-          offset = apps[0][1]
-          assert offset == 0x30000, 'app partition at ' + hex(offset) + ', expected 0x30000'
-          assert data[offset] == 0xE9, 'no application image at ' + hex(offset)
-          print('app image  :', hex(offset), 'ok')
+          print('bytes :', len(data))
+          print('sha256:', hashlib.sha256(data).hexdigest())
+          assert data[0] == 0xE9, 'not an ESP application image'
+          assert len(data) > 200_000, 'suspiciously small for this firmware'
+          desc = data.find(struct.pack('<I', 0xABCD5432), 0, 64)
+          if desc < 0:
+              print('warning: no application descriptor in the first 64 bytes')
+          else:
+              version = data[desc + 16:desc + 48].rstrip(b'\x00').decode()
+              project = data[desc + 48:desc + 80].rstrip(b'\x00').decode()
+              print('project:', project, '| version:', version)
+              assert project == 'handheld', 'built the wrong crate: ' + project
+          print('APPLICATION IMAGE OK - flash at 0x30000')
           PY
 
-      - name: Upload the image
+      - name: Upload the application image
         if: matrix.action.command == 'build'
         uses: actions/upload-artifact@v4
         with:
