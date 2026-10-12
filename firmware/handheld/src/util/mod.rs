@@ -7,8 +7,6 @@ use std::{fs::File, path::Path};
 pub fn open_system_file(relative_path: &str) -> std::io::Result<File> {
     use std::io::{Error, ErrorKind};
     let roots = &[
-        #[cfg(feature = "rev1")]
-        "/sdcard/system_rev1/",
         #[cfg(feature = "rev2")]
         "/sdcard/system_rev2/",
         "/sdcard/system/",

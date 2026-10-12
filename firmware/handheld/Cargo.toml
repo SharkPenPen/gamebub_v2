@@ -19,7 +19,6 @@ opt-level = "z"
 
 [features]
 default = ["std", "embassy", "esp-idf-svc/native"]
-rev1 = []  # Build for handheld revision 1
 rev2 = []  # Build for handheld revision 2
 
 pio = ["esp-idf-svc/pio"]

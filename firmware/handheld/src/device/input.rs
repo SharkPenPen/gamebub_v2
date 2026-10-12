@@ -28,10 +28,7 @@ impl Device<'_> {
     /// Get whether an HDMI cable is plugged in based on IO expander state
     pub(super) fn parse_hdmi_detect(&mut self, io_expander: [bool; 16]) -> Result<bool, ()> {
         cfg_if::cfg_if! {
-            if #[cfg(feature = "rev1")] {
-                // Rev 1: HDMI hot plug detect is active-low.
-                Ok(!io_expander[5])
-            } else if #[cfg(feature = "rev2")] {
+            if #[cfg(feature = "rev2")] {
                 // Rev 2: HDMI hot plug detect is not in I/O expander.
                 let _ = io_expander;
                 Ok(false)
