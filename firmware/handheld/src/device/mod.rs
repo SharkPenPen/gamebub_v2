@@ -211,11 +211,15 @@ impl Device<'_> {
         let lcd_reset = PinDriver::output(pin_lcd_reset)?;
         let lcd_dc = PinDriver::output(pin_lcd_dc)?;
         let mut lcd = drivers::lcd::ILI9488::new(lcd_reset, lcd_dc, lcd_spi);
-        lcd.init()?;
+        if let Err(error) = lcd.init() {
+            log::warn!("[LCD] initialization failed: {error} - continuing without it");
+        }
 
         // Setup I/O expander
         let mut io_expander = drivers::io_expander::TCA9535::new(MutexI2C::new(&i2c));
-        io_expander.get_pins()?;
+        if let Err(error) = io_expander.get_pins() {
+            log::warn!("[IOEXP] first read failed: {error} - continuing");
+        }
 
         // Direct buttons
         let button_home = PinDriver::input(pin_home)?;
@@ -253,7 +257,9 @@ impl Device<'_> {
 
         // Setup IMU
         let mut imu = drivers::imu::LSM6DS3TRC::new(MutexI2C::new(&i2c));
-        imu.init()?;
+        if let Err(error) = imu.init() {
+            log::warn!("[IMU] initialization failed: {error} - motion-controlled games will not work");
+        }
 
         // Ensure fpga power has stabilized.
         let time_since_fpga_power = Instant::now().duration_since(fpga_power_time);
@@ -263,13 +269,21 @@ impl Device<'_> {
         log::info!("Initializing DAC");
         let dac_reset = PinDriver::output(pin_dac_reset)?;
         let mut dac = drivers::dac::TLV320DAC3101::new(dac_reset, MutexI2C::new(&i2c));
-        dac.init()?;
-        dac.configure_interrupts()?;
-        dac.set_volume(kvs::keys::VOLUME.get().unwrap())?;
-        dac.set_mute(false)?;
-        let headphones_detected = dac.get_headphones_detected()?;
-        dac.set_headphones_enabled(headphones_detected)?;
-        dac.set_speakers_enabled(!headphones_detected)?;
+        // The DAC shares the I2C bus and sits on the FPGA power domain, so a
+        // failure here must not stop the boot.
+        let dac_result = (|| -> Result<(), drivers::dac::Error> {
+            dac.init()?;
+            dac.configure_interrupts()?;
+            dac.set_volume(kvs::keys::VOLUME.get().unwrap())?;
+            dac.set_mute(false)?;
+            let headphones_detected = dac.get_headphones_detected()?;
+            dac.set_headphones_enabled(headphones_detected)?;
+            dac.set_speakers_enabled(!headphones_detected)?;
+            Ok(())
+        })();
+        if let Err(error) = dac_result {
+            log::warn!("[DAC] bring-up incomplete: {error} - audio may not work");
+        }
 
         // Setup FPGA (without programming)
         let fpga_done = PinDriver::input(pin_fpga_done)?;
@@ -437,7 +451,7 @@ impl Device<'_> {
         );
         self.lcd_backlight_duty = duty;
         if self.display_mode == DisplayMode::Internal {
-            self.lcd_backlight.set_duty_cycle(duty).unwrap();
+            let _ = self.lcd_backlight.set_duty_cycle(duty);
         }
     }
 
@@ -446,11 +460,15 @@ impl Device<'_> {
     /// Reads the time from the RTC. Sets a default time if no time is set.
     /// Then sets it in esp-idf (via libc settimeofday).
     fn init_datetime(&mut self) {
-        if self.rtc.read_datetime().unwrap().is_none() {
-            log::warn!("No date set, resetting");
-            self.rtc
-                .write_datetime(drivers::rtc::Datetime::default())
-                .unwrap();
+        match self.rtc.read_datetime() {
+            Ok(None) => {
+                log::warn!("[RTC] no date set, resetting to the driver default");
+                if let Err(error) = self.rtc.write_datetime(drivers::rtc::Datetime::default()) {
+                    log::warn!("[RTC] could not write the default date: {error}");
+                }
+            }
+            Ok(Some(_)) => {}
+            Err(error) => log::warn!("[RTC] could not read the date: {error}"),
         }
         Device::set_esp_datetime(self.get_datetime());
     }
@@ -469,11 +487,12 @@ impl Device<'_> {
 
     /// Get the Device datetime.
     pub fn get_datetime(&mut self) -> time::OffsetDateTime {
-        let rtc_time = self.rtc.read_datetime().unwrap();
-        let ts = rtc_time
-            .and_then(|dt| dt.as_timestamp())
-            .unwrap_or(drivers::rtc::TIMESTAMP_2000);
-        time::OffsetDateTime::from_unix_timestamp(ts as i64).unwrap()
+        let ts = match self.rtc.read_datetime() {
+            Ok(Some(dt)) => dt.as_timestamp().unwrap_or(drivers::rtc::TIMESTAMP_2000),
+            _ => drivers::rtc::TIMESTAMP_2000,
+        };
+        time::OffsetDateTime::from_unix_timestamp(ts as i64)
+            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
     }
 
     /// Set the Device datetime.
@@ -482,7 +501,9 @@ impl Device<'_> {
         Device::set_esp_datetime(dt);
         let ts = dt.unix_timestamp();
         let dt = drivers::rtc::Datetime::from_timestamp(ts as u64).unwrap_or_default();
-        self.rtc.write_datetime(dt).unwrap();
+        if let Err(error) = self.rtc.write_datetime(dt) {
+            log::warn!("[RTC] could not set the time: {error}");
+        }
     }
 
     /// Update the display mode (internal vs external).
@@ -494,7 +515,7 @@ impl Device<'_> {
         log::info!("Display mode: {:?}", new_mode);
 
         if old_mode == DisplayMode::Internal {
-            self.lcd_backlight.set_duty_cycle_fully_off().unwrap();
+            let _ = self.lcd_backlight.set_duty_cycle_fully_off();
             self.lcd.enter_sleep()?;
         }
 
@@ -505,9 +526,9 @@ impl Device<'_> {
 
             // Let LCD stabilize and refresh before turning on backlight. Measured empirically.
             std::thread::sleep(Duration::from_millis(200));
-            self.lcd_backlight
-                .set_duty_cycle(self.lcd_backlight_duty)
-                .unwrap();
+            let _ = self
+                .lcd_backlight
+                .set_duty_cycle(self.lcd_backlight_duty);
         }
 
         self.display_mode = new_mode;

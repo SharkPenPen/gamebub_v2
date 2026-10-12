@@ -9,6 +9,14 @@ pub const G_ACCEL: f32 = 9.80665;
 
 const ADDRESS: u8 = 0x6A;
 
+/// WHO_AM_I values this driver accepts: the LSM6DS3TR-C the board was designed
+/// with (0x6A) and the older LSM6DS3 that some boards are populated with
+/// (0x69). The two are compatible for every register used here.
+const CHIP_IDS: [u8; 2] = [0x6A, 0x69];
+
+/// How many times to poll WHO_AM_I before giving up on the IMU.
+const WHO_AM_I_ATTEMPTS: u32 = 5;
+
 const REG_WHO_AM_I: u8 = 0x0F;
 const REG_CTRL1_XL: u8 = 0x10;
 const REG_CTRL2_G: u8 = 0x11;
@@ -52,13 +60,36 @@ where
         }
     }
 
-    pub fn init(&mut self) -> Result<(), Error> {
-        // Check chip ID.
-        let mut chip_id = 0u8;
+    fn read_reg(&mut self, reg: u8) -> Result<u8, Error> {
+        let mut value = 0u8;
         self.i2c
-            .write_read(ADDRESS, &[REG_WHO_AM_I], std::slice::from_mut(&mut chip_id))
+            .write_read(ADDRESS, &[reg], std::slice::from_mut(&mut value))
             .map_err(|_| Error::I2cError)?;
-        if chip_id != 0x6A {
+        Ok(value)
+    }
+
+    pub fn init(&mut self) -> Result<(), Error> {
+        // Check the chip ID, retrying: the part answers late on a cold board.
+        let mut chip_id = 0u8;
+        for attempt in 1..=WHO_AM_I_ATTEMPTS {
+            match self.read_reg(REG_WHO_AM_I) {
+                Ok(value) => {
+                    chip_id = value;
+                    if CHIP_IDS.contains(&value) {
+                        break;
+                    }
+                    log::warn!(
+                        "IMU WHO_AM_I read 0x{:02X} (expected 0x6A or 0x69), attempt {attempt}/{WHO_AM_I_ATTEMPTS}",
+                        value
+                    );
+                }
+                Err(_) => log::warn!(
+                    "IMU WHO_AM_I read failed, attempt {attempt}/{WHO_AM_I_ATTEMPTS}"
+                ),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if !CHIP_IDS.contains(&chip_id) {
             return Err(Error::ChipId);
         }
 

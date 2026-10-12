@@ -30,9 +30,12 @@ fn main() -> anyhow::Result<()> {
             compile_error!("No board revision selected");
         }
     };
+    // Warn instead of refusing to boot: a device whose revision was never
+    // flashed reports no revision at all, and a board that will not start
+    // cannot tell anyone why.
     if kvs::keys::DEVICE_REVISION.get() != Some(required_revision) {
-        anyhow::bail!(
-            "Incompatible firmware revision: device={:?} firmware={}",
+        log::warn!(
+            "[SYS] device reports revision {:?} but this firmware is built for revision {} - continuing",
             kvs::keys::DEVICE_REVISION.get(),
             required_revision
         );
@@ -142,7 +145,9 @@ fn reset_reason_name() -> &'static str {
 }
 
 fn show_fatal_error(error: String) {
-    Device::lock().lcd.enable_mcu_control().unwrap();
+    if let Err(e) = Device::lock().lcd.enable_mcu_control() {
+        log::warn!("could not hand the LCD back to the MCU: {e}");
+    }
     ui::send(ui::Message::FatalError(error));
     ui::send(ui::Message::Redraw);
 }
