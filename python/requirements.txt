@@ -1,2 +1,0 @@
-xbox360controller
-smbus2
