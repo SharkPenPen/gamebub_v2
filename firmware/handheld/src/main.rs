@@ -71,17 +71,25 @@ fn main() -> anyhow::Result<()> {
         device.lcd.enable_fpga_control()?;
         Ok(())
     }
-    let fpga_program_result = program_fpga(&mut device);
+    match program_fpga(&mut device) {
+        Ok(()) => {}
+        Err(_) if !is_sdcard_mounted => {
+            // Without a card there is no bitstream to load, but the MCU can
+            // still drive the LCD, so this is reported on screen further down.
+        }
+        Err(error) => {
+            // The FPGA drives the LCD, so a failed bring-up leaves nothing to
+            // show: keep the board alive in diagnostics instead.
+            device::test_hardware::hold_alive(&mut device, &format!("{error:#}"));
+        }
+    }
 
     // Setup UI
     let mut ui = UI::new(&mut device);
     std::mem::drop(device);
 
-    // If there was an error programming the FPGA, show it now.
     if !is_sdcard_mounted {
         show_fatal_error("Error mounting SD card".into());
-    } else if let Err(error) = fpga_program_result {
-        show_fatal_error_anyhow(error);
     }
 
     // Run UI in this thread.
@@ -131,16 +139,6 @@ fn reset_reason_name() -> &'static str {
         15 => "CPU_LOCKUP",
         _ => "UNRECOGNIZED",
     }
-}
-
-fn show_fatal_error_anyhow(error: anyhow::Error) {
-    use std::fmt::Write;
-
-    let mut message = format!("{}\n", error);
-    for e in error.chain().skip(1) {
-        let _ = write!(message, "\n{}", e);
-    }
-    show_fatal_error(message);
 }
 
 fn show_fatal_error(error: String) {

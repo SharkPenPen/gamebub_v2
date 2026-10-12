@@ -8,13 +8,18 @@
 //! Call [`run_tests`] from `main` after `Device::init`.
 
 use std::fmt::{self, Display};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use embedded_hal::digital::InputPin;
 
 use crate::util;
 
 use super::Device;
+
+/// How often the diagnostic report repeats while holding alive.
+const DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(5);
+/// How long the power button must be held to switch the device off.
+const POWER_OFF_HOLD: Duration = Duration::from_secs(3);
 
 /// Result of one self-test run.
 #[derive(Default, Copy, Clone)]
@@ -48,6 +53,11 @@ impl Display for Summary {
 /// Read an input pin, reporting a driver error as "not high".
 fn pin_is_high<P: InputPin>(pin: &mut P) -> bool {
     pin.is_high().unwrap_or(false)
+}
+
+/// Read an input pin, reporting a driver error as "not low".
+fn pin_is_low<P: InputPin>(pin: &mut P) -> bool {
+    pin.is_low().unwrap_or(false)
 }
 
 /// Pack I/O expander inputs into a word, for logging.
@@ -256,5 +266,72 @@ fn check_dac(device: &mut Device<'_>, summary: &mut Summary) {
         Err(_) => {
             summary.warn("[DAC] TLV320DAC3101 status read failed: check I2C and the reset line")
         }
+    }
+}
+
+/// Stay alive in a diagnostic loop when the FPGA could not be brought up.
+///
+/// The FPGA drives the LCD, so a failed bring-up leaves a blank screen and
+/// nothing to look at. Instead the LED blinks at 1 Hz (the board is visibly
+/// alive without a console), the full report repeats on the console every few
+/// seconds, a long press of the power button switches the device off, and a
+/// battery that is already too low cuts power rather than being drained
+/// further. Never returns.
+pub fn hold_alive(device: &mut Device<'_>, reason: &str) -> ! {
+    log::error!("============================================================");
+    log::error!("[BRINGUP] FPGA BRING-UP FAILED - staying alive in diagnostics");
+    log::error!("[BRINGUP] reason: {}", reason);
+    log::error!("[BRINGUP] the FPGA drives the LCD, so the screen stays blank");
+    log::error!(
+        "[BRINGUP] the report below repeats every {} s on the serial console",
+        DIAGNOSTIC_INTERVAL.as_secs()
+    );
+    log::error!(
+        "[BRINGUP] hold the power button for {} s to switch off",
+        POWER_OFF_HOLD.as_secs()
+    );
+    log::error!("============================================================");
+
+    let mut led_on = false;
+    let mut last_report = Instant::now();
+    let mut power_pressed_since: Option<Instant> = None;
+
+    loop {
+        // Blink the status LED so the board is visibly alive without a console.
+        led_on = !led_on;
+        device.set_led(led_on);
+
+        // A long press of the power button switches the device off.
+        if pin_is_low(&mut device.button_power) {
+            let since = *power_pressed_since.get_or_insert_with(Instant::now);
+            if since.elapsed() >= POWER_OFF_HOLD {
+                log::warn!("[BRINGUP] power button held: switching off");
+                device.power_off();
+            }
+        } else {
+            power_pressed_since = None;
+        }
+
+        // Do not sit there draining a battery that is already too low.
+        if let Ok(voltage) = device.fuel_gauge.get_battery_voltage() {
+            if crate::power::is_battery_critical(voltage, device.get_vbus_pgood()) {
+                log::error!("[BRINGUP] battery at {:.2} V: switching off", voltage);
+                device.power_off();
+            }
+        }
+
+        // Repeat the whole report, so the console shows the current state.
+        if last_report.elapsed() >= DIAGNOSTIC_INTERVAL {
+            last_report = Instant::now();
+            log::info!("--- [BRINGUP] diagnostic report (FPGA not running) ---");
+            let summary = run_tests(device);
+            if summary.is_clean() {
+                log::info!("--- [BRINGUP] all checks clean; still failing: {reason} ---");
+            } else {
+                log::warn!("--- [BRINGUP] {summary}; still failing: {reason} ---");
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(500));
     }
 }

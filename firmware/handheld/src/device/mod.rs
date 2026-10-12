@@ -368,6 +368,11 @@ impl Device<'_> {
         Device::get().lock().unwrap()
     }
 
+    /// Set the status LED (active-high).
+    pub fn set_led(&mut self, on: bool) {
+        let _ = self.led.set_level(on.into());
+    }
+
     /// Enable or disable FPGA power.
     ///
     /// Note that it may take around 5ms to stabilize.
