@@ -19,7 +19,9 @@ fn main() -> anyhow::Result<()> {
     log::set_max_level(log::LevelFilter::Info);
     esp_idf_svc::log::set_target_level("gpio", log::LevelFilter::Warn).unwrap();
 
-    kvs::Kvs::init()?;
+    if let Err(error) = kvs::Kvs::init() {
+        log::warn!("[KVS] storage initialization failed: {error} - continuing with defaults");
+    }
     log_boot_banner();
 
     // Check that the firmware is compatible with the listed revision.

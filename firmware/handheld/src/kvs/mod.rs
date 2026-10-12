@@ -13,18 +13,23 @@ static NAMESPACE: &'static str = "gb";
 ///  * Use a single global lock for all keys and all keys' caches?
 ///  * use a macro when defining keys to ensure they're all in flush_all
 pub struct Kvs {
-    nvs_main: EspNvs<NvsCustom>,
-    nvs_ro: EspNvs<NvsCustom>,
+    /// Read-write settings. Missing means settings are not persisted.
+    nvs_main: Option<EspNvs<NvsCustom>>,
+    /// Read-only factory data (serial, hardware revision).
+    nvs_ro: Option<EspNvs<NvsCustom>>,
 }
 
 impl Kvs {
+    /// Open the storage namespaces.
+    ///
+    /// A namespace that is not there is **not** an error. The read-only
+    /// partition holds per-device factory data that may never have been written
+    /// (a hand-built board), and flashing a merged image erases it. Either way
+    /// the firmware has to come up with defaults: a device that refuses to boot
+    /// cannot tell anyone that its factory data is missing.
     pub fn init() -> Result<(), anyhow::Error> {
-        let nvs_main = EspNvs::new(EspNvsPartition::<NvsCustom>::take("nvs")?, NAMESPACE, true)?;
-        let nvs_ro = EspNvs::new(
-            EspNvsPartition::<NvsCustom>::take("nvs_ro")?,
-            NAMESPACE,
-            false,
-        )?;
+        let nvs_main = Self::open("nvs", true);
+        let nvs_ro = Self::open("nvs_ro", false);
 
         let kvs = Kvs { nvs_main, nvs_ro };
         KVS.set(Mutex::new(kvs))
@@ -34,15 +39,36 @@ impl Kvs {
         Ok(())
     }
 
+    /// Open one namespace, reporting rather than propagating a failure.
+    fn open(label: &str, read_write: bool) -> Option<EspNvs<NvsCustom>> {
+        let partition = match EspNvsPartition::<NvsCustom>::take(label) {
+            Ok(partition) => partition,
+            Err(error) => {
+                log::warn!("[KVS] there is no '{label}' partition: {error}");
+                return None;
+            }
+        };
+
+        match EspNvs::new(partition, NAMESPACE, read_write) {
+            Ok(nvs) => Some(nvs),
+            Err(error) => {
+                log::warn!(
+                    "[KVS] the '{NAMESPACE}' namespace is not usable in '{label}' ({error}): defaults will be used"
+                );
+                None
+            }
+        }
+    }
+
     pub fn get() -> MutexGuard<'static, Kvs> {
         KVS.get().unwrap().lock().unwrap()
     }
 
-    fn nvs(&mut self, read_only: bool) -> &mut EspNvs<NvsCustom> {
+    fn nvs(&mut self, read_only: bool) -> Option<&mut EspNvs<NvsCustom>> {
         if read_only {
-            &mut self.nvs_ro
+            self.nvs_ro.as_mut()
         } else {
-            &mut self.nvs_main
+            self.nvs_main.as_mut()
         }
     }
 }
@@ -93,15 +119,43 @@ impl<T: Serialize + DeserializeOwned + Clone> KvsKey<T> {
     }
 
     /// Get the value directly from NVS, without going through the cache.
+    ///
+    /// Every failure is reported and turned into "no value", so that a missing
+    /// key, an erased partition or a value written by another firmware version
+    /// falls back to the default instead of taking the application down.
     fn get_direct(&self) -> Option<T> {
         let mut kvs = Kvs::get();
-        let nvs = kvs.nvs(self.read_only);
-        let len = nvs.len(self.name).expect("error reading len")?;
+        let nvs = kvs.nvs(self.read_only)?;
+
+        let len = match nvs.len(self.name) {
+            Ok(Some(len)) => len,
+            Ok(None) => return None,
+            Err(error) => {
+                log::warn!("[KVS] cannot read the length of '{}': {error}", self.name);
+                return None;
+            }
+        };
+
         let mut v = SmallVec::<[u8; SMALL_SIZE]>::from_elem(0, len);
-        let data = nvs
-            .get_raw(self.name, &mut v)
-            .expect("error reading value")?;
-        Some(postcard::from_bytes(data).expect("error deserializing"))
+        let data = match nvs.get_raw(self.name, &mut v) {
+            Ok(Some(data)) => data,
+            Ok(None) => return None,
+            Err(error) => {
+                log::warn!("[KVS] cannot read '{}': {error}", self.name);
+                return None;
+            }
+        };
+
+        match postcard::from_bytes(data) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                log::warn!(
+                    "[KVS] '{}' holds a value this firmware cannot read: {error}",
+                    self.name
+                );
+                None
+            }
+        }
     }
 
     pub fn get(&self) -> Option<T> {
@@ -127,10 +181,20 @@ impl<T: Serialize + DeserializeOwned + Clone> KvsKey<T> {
 
     fn set_direct(&self, value: &T) {
         let mut kvs = Kvs::get();
-        let nvs = kvs.nvs(self.read_only);
+        let Some(nvs) = kvs.nvs(self.read_only) else {
+            log::warn!("[KVS] '{}' cannot be stored: no usable namespace", self.name);
+            return;
+        };
+
         let mut v = SmallVec::<[u8; SMALL_SIZE]>::new();
-        postcard::to_io(value, &mut v).expect("error serializing");
-        nvs.set_raw(self.name, &v).expect("error writing");
+        if let Err(error) = postcard::to_io(value, &mut v) {
+            log::warn!("[KVS] cannot serialize '{}': {error}", self.name);
+            return;
+        }
+
+        if let Err(error) = nvs.set_raw(self.name, &v) {
+            log::warn!("[KVS] cannot write '{}': {error}", self.name);
+        }
     }
 
     pub fn set(&self, value: &T) {
