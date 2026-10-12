@@ -44,6 +44,18 @@ fn main() -> anyhow::Result<()> {
     let is_sdcard_mounted = device.sdcard.is_some();
     device.set_brightness(kvs::keys::BRIGHTNESS.get().unwrap());
 
+    // Report what the board looks like before anything is programmed. This is
+    // the log to read when the device does not come up.
+    let self_test = device::test_hardware::run_tests(&mut device);
+    if self_test.is_clean() {
+        log::info!("=== Self-test complete: clean - boot continues ===");
+    } else {
+        log::warn!(
+            "=== Self-test complete: {} - the device may still work; see the tagged lines above ===",
+            self_test
+        );
+    }
+
     // Setup workers.
     worker::start();
 

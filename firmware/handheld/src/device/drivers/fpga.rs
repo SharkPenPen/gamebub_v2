@@ -344,6 +344,27 @@ where
         Ok((self.read_u32(REG_STATUS)? & 1) != 0)
     }
 
+    /// Whether INIT_B is high, which means the configuration logic is ready.
+    pub fn init_b_is_high(&mut self) -> Result<bool, Error> {
+        self.pin_init_b.is_high().map_err(|_| Error::PinError)
+    }
+
+    /// Whether DONE is high, which means the FPGA is configured.
+    pub fn done_is_high(&mut self) -> Result<bool, Error> {
+        self.pin_done.is_high().map_err(|_| Error::PinError)
+    }
+
+    /// Drive PROGRAM_B: `true` asserts it (low, starting a configuration
+    /// reset), `false` releases it back to high.
+    pub fn set_program_b(&mut self, assert: bool) -> Result<(), Error> {
+        let result = if assert {
+            self.pin_program_b.set_low()
+        } else {
+            self.pin_program_b.set_high()
+        };
+        result.map_err(|_| Error::PinError)
+    }
+
     pub fn set_display_mode(&mut self, new_mode: DisplayMode) -> Result<(), Error> {
         self.write_u32(REG_DISPLAY, (new_mode == DisplayMode::External) as u32)
     }

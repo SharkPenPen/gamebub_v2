@@ -21,6 +21,7 @@ use esp_idf_svc::hal::{i2c::*, ledc};
 pub mod drivers;
 mod input;
 mod interrupt;
+pub mod test_hardware;
 
 /// Time it may take for FPGA power rails to stabilize after enable.
 const FPGA_POWER_DELAY: Duration = Duration::from_millis(5);
