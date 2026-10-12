@@ -184,6 +184,10 @@ the bootloader is `esp32s3-qio-bootloader-fast.bin` at `0x0` and the partition t
 from `partitions.csv` at `0x8000`. A *merged* image is deliberately not published - it
 would fill the gap between `0x8000` and `0x30000` with `0xFF` and wipe `nvs_ro`.
 
+If you flash locally, note that `espflash.toml` uses the **espflash 3.x** layout. espflash 4.x
+expects `bootloader` and `partition_table` to live in an `[idf_format_args]` table and
+refuses to run otherwise, which is why the workflow pins espflash 3.3.0.
+
 The per-device factory data (serial, hardware revision) lives in that `nvs_ro` partition.
 Without it the firmware says so in the boot banner and keeps going; `flash_nvs.py` can write
 it at any later point.

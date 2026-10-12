@@ -9,8 +9,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Pinned so the shape of the command line does not change under us.
-  ESPFLASH_VERSION: v4.4.0
+  # Pinned to the 3.x line on purpose: espflash.toml uses the 3.x layout, and
+  # espflash 4 refuses to run unless bootloader/partition_table move into an
+  # [idf_format_args] table.
+  ESPFLASH_VERSION: v3.3.0
 
 jobs:
   firmware:
