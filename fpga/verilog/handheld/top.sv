@@ -347,10 +347,6 @@ module top_handheld (
     assign pmod[2] = inner_pmod_dir[2] ? inner_pmod_out[2] : 1'bz;
     assign pmod[3] = inner_pmod_dir[3] ? inner_pmod_out[3] : 1'bz;
 
-`ifdef BOARD_REV_1
-    // Rev 1: FPGA irq directly connected to open-drain MCU_INT
-    assign mcu_irq_n = inner_mcu_irq ? 1'b0 : 1'bz;
-`endif
 `ifdef BOARD_REV_2
     // Rev 2: FPGA irq connected to nFET, active-high
     assign mcu_irq_n = inner_mcu_irq;
@@ -395,14 +391,6 @@ module top_handheld (
         .cx(hdmi_cx),
         .cy(hdmi_cy)
     );
-`ifdef BOARD_REV_1
-    defparam hdmi.INVERT_D0 = 1;
-
-    OBUFDS #(.IOSTANDARD("TMDS_33")) obufds0      (.I(hdmi_tmds_data[0]), .O(hdmi_data_n[0]), .OB(hdmi_data_p[0]));
-    OBUFDS #(.IOSTANDARD("TMDS_33")) obufds1      (.I(hdmi_tmds_data[1]), .O(hdmi_data_p[1]), .OB(hdmi_data_n[1]));
-    OBUFDS #(.IOSTANDARD("TMDS_33")) obufds2      (.I(hdmi_tmds_data[2]), .O(hdmi_data_p[2]), .OB(hdmi_data_n[2]));
-    OBUFDS #(.IOSTANDARD("TMDS_33")) obufds_clock (.I(hdmi_tmds_clock  ), .O(hdmi_clk_p    ), .OB(hdmi_clk_n    ));
-`endif
 `ifdef BOARD_REV_2
     defparam hdmi.INVERT_D0 = 1;
     defparam hdmi.INVERT_D1 = 1;

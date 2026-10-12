@@ -25,10 +25,6 @@ filesets:
       - verilog/handheld/top.sv : {file_type : systemVerilogSource}
       - verilog/handheld/clk_wiz_spi_clk_wiz.v : {file_type : verilogSource}
 
-  handheld_rev_1:
-    files:
-      - verilog/handheld/rev_1.xdc : {file_type : xdc}
-
   handheld_rev_2:
     files:
       - verilog/handheld/rev_2.xdc : {file_type : xdc}
@@ -73,10 +69,6 @@ filesets:
     file_type: cppSource
 
 parameters:
-  BOARD_REV_1:
-    datatype: bool
-    paramtype: vlogdefine
-
   BOARD_REV_2:
     datatype: bool
     paramtype: vlogdefine
@@ -144,11 +136,6 @@ targets:
     tools:
       vivado:
         part: xc7a100tcsg324-2
-
-  handheld_rev1:
-    <<: *handheld
-    filesets_append: [handheld_rev_1]
-    parameters: [BOARD_REV_1=true]
 
   handheld_rev2:
     <<: *handheld
