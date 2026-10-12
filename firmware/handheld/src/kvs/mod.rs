@@ -182,7 +182,10 @@ impl<T: Serialize + DeserializeOwned + Clone> KvsKey<T> {
     fn set_direct(&self, value: &T) {
         let mut kvs = Kvs::get();
         let Some(nvs) = kvs.nvs(self.read_only) else {
-            log::warn!("[KVS] '{}' cannot be stored: no usable namespace", self.name);
+            log::warn!(
+                "[KVS] '{}' cannot be stored: no usable namespace",
+                self.name
+            );
             return;
         };
 
