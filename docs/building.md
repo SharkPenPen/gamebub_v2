@@ -160,26 +160,33 @@ For the order to bring a revision 2 board up, add features to and simplify this 
 ### Flashing from a CI build
 
 Every push builds the firmware on GitHub Actions (see
-`.github/workflows/firmware.yml`), and a successful `build` job attaches a single flashable
-image to the run:
+`.github/workflows/firmware.yml`), and a successful `build` job attaches the application
+image to the run as the `gamebub-rev2-firmware` artifact:
 
-1. Open the latest run under *Actions* and download the `gamebub-rev2-firmware` artifact.
-   It contains `gamebub-rev2.bin`.
+1. Open the latest run under *Actions* and download that artifact. It contains
+   `gamebub-rev2.bin`.
 2. Put the device into download mode (hold "Home" while switching it on) and write the
-   image at offset `0x0`, either with the Espressif flash tool or from the command line:
+   application to its partition at **`0x30000`** (see `partitions.csv`), either with the
+   Espressif flash tool or from the command line:
 
    ```sh
-   esptool.py --chip esp32s3 write_flash 0x0 gamebub-rev2.bin
+   esptool.py --chip esp32s3 write_flash 0x30000 gamebub-rev2.bin
    ```
 
-The image already contains the bootloader, the partition table (the application lives at
-`0x30000`) and the application, all built from this repository's `espflash.toml`, so it is
-the same thing a local `cargo run --release --features=rev2` would flash. The workflow also
-reads the image back and checks the partition table before publishing it.
+The image is the revision 2 application, written by espflash with this repository's
+`espflash.toml`, so it is the same image a local `cargo run --release --features=rev2`
+would flash. The workflow reads it back and checks that it really is an ESP-IDF
+application for this crate before publishing it.
 
-The per-device factory data (serial, hardware revision) lives in the `nvs_ro` partition and
-is **not** part of the image. Without it the firmware says so in the boot banner and keeps
-going; `flash_nvs.py` can write it at any later point.
+Writing only the application leaves the bootloader, the partition table and the factory
+data untouched, which is what a normal update wants. For a device whose flash was wiped:
+the bootloader is `esp32s3-qio-bootloader-fast.bin` at `0x0` and the partition table comes
+from `partitions.csv` at `0x8000`. A *merged* image is deliberately not published - it
+would fill the gap between `0x8000` and `0x30000` with `0xFF` and wipe `nvs_ro`.
+
+The per-device factory data (serial, hardware revision) lives in that `nvs_ro` partition.
+Without it the firmware says so in the boot banner and keeps going; `flash_nvs.py` can write
+it at any later point.
 
 The bitstreams are separate and live on the SD card: [roadmap.md](./roadmap.md) lists the
 three files and their checksums.
